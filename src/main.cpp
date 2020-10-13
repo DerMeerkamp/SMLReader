@@ -55,7 +55,7 @@ void process_message(byte *buffer, size_t len, Sensor *sensor)
 	}
 }
 
-void setup2()
+void purge_eprom()
 {
 	SERIAL_DEBUG_SETUP(115200);
 
@@ -63,13 +63,13 @@ void setup2()
 	// Delay for getting a serial console attached in time
 	delay(2000);
 #endif
-EEPROM.begin(4096);
-for (int i = 0 ; i < 4096 ; i++) {
-	EEPROM.write(i, 0);
-	DEBUG("write %d", i);
-}
-EEPROM.commit();
-DEBUG("done");
+	EEPROM.begin(4096);
+	for (int i = 0 ; i < 4096 ; i++) {
+		EEPROM.write(i, 0);
+		DEBUG("write %d", i);
+	}
+	EEPROM.commit();
+	DEBUG("done");
 }
 
 void setup()
