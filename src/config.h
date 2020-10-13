@@ -16,10 +16,18 @@ const char *WIFI_AP_DEFAULT_PASSWORD = "";
 static const SensorConfig SENSOR_CONFIGS[] = {
     {.pin = D2,
      .name = "1",
+     .type = "SML",
      .numeric_only = false,
      .status_led_enabled = true,
      .status_led_inverted = true,
-     .status_led_pin = LED_BUILTIN}};
+     .status_led_pin = LED_BUILTIN},
+     {.pin = D5,
+      .name = "2",
+      .type = "AM2302",
+      .numeric_only = false,
+      .status_led_enabled = true,
+      .status_led_inverted = true,
+      .status_led_pin = LED_BUILTIN}};
 
 const uint8_t NUM_OF_SENSORS = sizeof(SENSOR_CONFIGS) / sizeof(SensorConfig);
 

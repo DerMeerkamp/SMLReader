@@ -3,6 +3,7 @@
 
 #include <SoftwareSerial.h>
 #include <jled.h>
+#include "DHT.h"
 #include "debug.h"
 
 // SML constants
@@ -10,6 +11,7 @@ const byte START_SEQUENCE[] = {0x1B, 0x1B, 0x1B, 0x1B, 0x01, 0x01, 0x01, 0x01};
 const byte END_SEQUENCE[] = {0x1B, 0x1B, 0x1B, 0x1B, 0x1A};
 const size_t BUFFER_SIZE = 3840; // Max datagram duration 400ms at 9600 Baud
 const uint8_t READ_TIMEOUT = 30;
+const uint8_t SAMPLING_RATE = 60;
 
 // States
 enum State
@@ -26,6 +28,7 @@ class SensorConfig
 public:
     const uint8_t pin;
     const char *name;
+    const char *type;
     const bool numeric_only;
     const bool status_led_enabled;
     const bool status_led_inverted;
@@ -40,11 +43,20 @@ public:
     {
         this->config = config;
         DEBUG("Initializing sensor %s...", this->config->name);
-        this->callback = callback;
-        this->serial = new SoftwareSerial();
-        this->serial->begin(9600, SWSERIAL_8N1, this->config->pin, -1, false);
-        this->serial->enableTx(false);
-        this->serial->enableRx(true);
+        if ( strcmp (this->config->type,"SML") == 0) {
+          DEBUG("Type: %s...", this->config->type);
+          this->callback = callback;
+          this->serial = new SoftwareSerial();
+          this->serial->begin(9600, SWSERIAL_8N1, this->config->pin, -1, false);
+          this->serial->enableTx(false);
+          this->serial->enableRx(true);
+        }
+        if ( strcmp (this->config->type,"AM2302") == 0) {
+          DEBUG("Type: %s...", this->config->type);
+          this->callback = callback;
+          this->dht = new DHT(this->config->pin, DHT22);
+	        this->dht->begin();
+        }
         DEBUG("Initialized sensor %s.", this->config->name);
 
         if (this->config->status_led_enabled) {
@@ -69,9 +81,11 @@ public:
 
 private:
     SoftwareSerial *serial;
+    DHT *dht;
     byte buffer[BUFFER_SIZE];
     size_t position = 0;
     unsigned long last_state_reset = 0;
+    unsigned long last_sample = 0;
     uint8_t bytes_until_checksum = 0;
     uint8_t loop_counter = 0;
     State state = INIT;
@@ -82,11 +96,13 @@ private:
     {
         if (this->state != INIT)
         {
+          if ( strcmp (this->config->type,"SML") == 0) {
             if ((millis() - this->last_state_reset) > (READ_TIMEOUT * 1000))
             {
                 DEBUG("Did not receive an SML message within %d seconds, starting over.", READ_TIMEOUT);
                 this->reset_state();
             }
+          }
             switch (this->state)
             {
             case WAIT_FOR_START_SEQUENCE:
@@ -123,22 +139,23 @@ private:
     {
         if (new_state == WAIT_FOR_START_SEQUENCE)
         {
-            DEBUG("State of sensor %s is 'WAIT_FOR_START_SEQUENCE'.", this->config->name);
+            DEBUG("State of sensor %s type %s is 'WAIT_FOR_START_SEQUENCE'.", this->config->name, this->config->type);
             this->last_state_reset = millis();
+            this->last_sample = millis();
             this->position = 0;
         }
         else if (new_state == READ_MESSAGE)
         {
-            DEBUG("State of sensor %s is 'READ_MESSAGE'.", this->config->name);
+            DEBUG("State of sensor %s type %s is 'READ_MESSAGE'.", this->config->name, this->config->type);
         }
         else if (new_state == READ_CHECKSUM)
         {
-            DEBUG("State of sensor %s is 'READ_CHECKSUM'.", this->config->name);
+            DEBUG("State of sensor %s type %s is 'READ_CHECKSUM'.", this->config->name, this->config->type);
             this->bytes_until_checksum = 3;
         }
         else if (new_state == PROCESS_MESSAGE)
         {
-            DEBUG("State of sensor %s is 'PROCESS_MESSAGE'.", this->config->name);
+            DEBUG("State of sensor %s type %s is 'PROCESS_MESSAGE'.", this->config->name, this->config->type);
         };
         this->state = new_state;
     }
@@ -162,55 +179,93 @@ private:
     // Wait for the start_sequence to appear
     void wait_for_start_sequence()
     {
-        while (this->data_available())
-        {
-            this->buffer[this->position] = this->data_read();
-            yield();
-
-            this->position = (this->buffer[this->position] == START_SEQUENCE[this->position]) ? (this->position + 1) : 0;
-            if (this->position == sizeof(START_SEQUENCE))
+        if ( strcmp (this->config->type,"SML") == 0) {
+            while (this->data_available())
             {
-                // Start sequence has been found
-                DEBUG("Start sequence found.");
-                if (this->config->status_led_enabled) {
-                    this->status_led->Blink(50,50).Repeat(3);
+                this->buffer[this->position] = this->data_read();
+                yield();
+
+                this->position = (this->buffer[this->position] == START_SEQUENCE[this->position]) ? (this->position + 1) : 0;
+                if (this->position == sizeof(START_SEQUENCE))
+                {
+                    // Start sequence has been found
+                    DEBUG("Start sequence found.");
+                    if (this->config->status_led_enabled) {
+                        this->status_led->Blink(50,50).Repeat(3);
+                    }
+                    this->set_state(READ_MESSAGE);
+                    return;
+                }
+            }
+	      }
+        if ( strcmp (this->config->type,"AM2302") == 0) {
+            if ((millis() - this->last_sample) > (SAMPLING_RATE * 1000))
+            {
+
+                DEBUG("AM2302 Sample time %d reached", SAMPLING_RATE);
+                // create float to byte array construct
+                union memory{
+                  byte asBytes[8];
+                  float asFloat[2];
+                };
+                union memory tobuffer;
+                // Read humidity
+                tobuffer.asBytes[0] = this->dht->readHumidity();
+                DEBUG("humidity: %d", tobuffer.asBytes[0]);
+                // Read temperature as Celsius
+                tobuffer.asBytes[1] = this->dht->readTemperature();
+                DEBUG("temperature: %d", tobuffer.asBytes[1]);
+                // Check if any reads failed and exit early (to try again).
+                if (isnan(tobuffer.asBytes[0]) || isnan(tobuffer.asBytes[1]) ) {
+                  DEBUG("Failed to read from DHT sensor!");
+                  this->reset_state();
+                }
+                for (uint y = 0; y <= (sizeof(tobuffer) -1 ); y++)
+                {
+                  this->buffer[y] = tobuffer.asBytes[y];
                 }
                 this->set_state(READ_MESSAGE);
-                return;
             }
-        }
+
+	      }
     }
 
     // Read the rest of the message
     void read_message()
     {
-        while (this->data_available())
-        {
-            // Check whether the buffer is still big enough to hold the number of fill bytes (1 byte) and the checksum (2 bytes)
-            if ((this->position + 3) == BUFFER_SIZE)
+        if ( strcmp (this->config->type,"SML") == 0) {
+            while (this->data_available())
             {
-                this->reset_state("Buffer will overflow, starting over.");
-                return;
-            }
-            this->buffer[this->position++] = this->data_read();
-            yield();
-
-            // Check for end sequence
-            int last_index_of_end_seq = sizeof(END_SEQUENCE) - 1;
-            for (int i = 0; i <= last_index_of_end_seq; i++)
-            {
-                if (END_SEQUENCE[last_index_of_end_seq - i] != this->buffer[this->position - (i + 1)])
+                // Check whether the buffer is still big enough to hold the number of fill bytes (1 byte) and the checksum (2 bytes)
+                if ((this->position + 3) == BUFFER_SIZE)
                 {
-                    break;
-                }
-                if (i == last_index_of_end_seq)
-                {
-                    DEBUG("End sequence found.");
-                    this->set_state(READ_CHECKSUM);
+                    this->reset_state("Buffer will overflow, starting over.");
                     return;
                 }
+                this->buffer[this->position++] = this->data_read();
+                yield();
+
+                // Check for end sequence
+                int last_index_of_end_seq = sizeof(END_SEQUENCE) - 1;
+                for (int i = 0; i <= last_index_of_end_seq; i++)
+                {
+                    if (END_SEQUENCE[last_index_of_end_seq - i] != this->buffer[this->position - (i + 1)])
+                    {
+                        break;
+                    }
+                    if (i == last_index_of_end_seq)
+                    {
+                        DEBUG("End sequence found.");
+                        this->set_state(READ_CHECKSUM);
+                        return;
+                    }
+                }
             }
-        }
+	}
+        if ( strcmp (this->config->type,"AM2302") == 0) {
+	     // read
+            this->set_state(PROCESS_MESSAGE);
+	      }
     }
 
     // Read the number of fillbytes and the checksum
@@ -240,7 +295,6 @@ private:
         {
             this->callback(this->buffer, this->position, this);
         }
-
         // Start over
         this->reset_state();
     }

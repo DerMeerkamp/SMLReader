@@ -35,6 +35,7 @@ boolean connected = false;
 
 void process_message(byte *buffer, size_t len, Sensor *sensor)
 {
+  if ( strcmp (sensor->config->type,"SML") == 0) {
 	// Parse
 	sml_file *file = sml_file_parse(buffer + 8, len - 16);
 
@@ -46,6 +47,29 @@ void process_message(byte *buffer, size_t len, Sensor *sensor)
 
 	// free the malloc'd memory
 	sml_file_free(file);
+	}
+	if ( strcmp (sensor->config->type,"AM2302") == 0) {
+		if (connected) {
+			publisher.publishAM2302(sensor, buffer);
+		}
+	}
+}
+
+void setup2()
+{
+	SERIAL_DEBUG_SETUP(115200);
+
+#ifdef DEBUG
+	// Delay for getting a serial console attached in time
+	delay(2000);
+#endif
+EEPROM.begin(4096);
+for (int i = 0 ; i < 4096 ; i++) {
+	EEPROM.write(i, 0);
+	DEBUG("write %d", i);
+}
+EEPROM.commit();
+DEBUG("done");
 }
 
 void setup()

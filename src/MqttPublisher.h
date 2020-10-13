@@ -56,6 +56,13 @@ public:
     publish(baseTopic + "info", message);
   }
 
+  void publishAM2302(Sensor *sensor, byte *buffer)
+  {
+    String entryTopic = baseTopic + "sensor/" + (sensor->config->name) + "/";
+    publish(entryTopic + "humidity", String(buffer[0]));
+    publish(entryTopic + "temperature", String(buffer[1]));
+  }
+
   void publish(Sensor *sensor, sml_file *file)
   {
 
@@ -83,7 +90,7 @@ public:
                         entry->obj_name->str[4], entry->obj_name->str[5]);
 
                 String entryTopic = baseTopic + "sensor/" + (sensor->config->name) + "/obis/" + obisIdentifier + "/";
-                
+
                 if (((entry->value->type & SML_TYPE_FIELD) == SML_TYPE_INTEGER) ||
                          ((entry->value->type & SML_TYPE_FIELD) == SML_TYPE_UNSIGNED))
                 {
